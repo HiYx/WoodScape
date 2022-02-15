@@ -143,7 +143,9 @@ class YoloDecoder(nn.Module):
         super(YoloDecoder, self).__init__()
         self.args = args
         output_shape = 5 + args.num_classes_detection
-
+        
+        #  把几个embedding都创建起来,同时将小size的feature map做upsample x2,给FPN结构准备
+        #  参考：https://zhuanlan.zhihu.com/p/40773270
         #  embedding0
         final_out_filter0 = len(args.anchors1) * output_shape
         self.embedding0 = self._make_embedding([512, 1024], _out_filters[-1], final_out_filter0)
@@ -168,6 +170,7 @@ class YoloDecoder(nn.Module):
         self.final_layer1 = YOLOLayer(self.args.anchors2, self.args)
         self.final_layer2 = YOLOLayer(self.args.anchors3, self.args)
 
+    #conv bn relu
     def _make_cbl(self, _in, _out, ks):
         """ cbl = conv + batch_norm + leaky_relu"""
         pad = (ks - 1) // 2 if ks else 0
@@ -176,6 +179,7 @@ class YoloDecoder(nn.Module):
                                           ("bn", nn.BatchNorm2d(_out)),
                                           ("relu", nn.ReLU())]))
 
+    #每个embedding都是一样的结构conv 1-> conv 3->conv 1-> conv 3->conv 1-> conv 3
     def _make_embedding(self, filters_list, in_filters, out_filter):
         m = nn.ModuleList([self._make_cbl(in_filters, filters_list[0], 1),
                            self._make_cbl(filters_list[0], filters_list[1], 3),
@@ -192,6 +196,7 @@ class YoloDecoder(nn.Module):
         yolo_output_dict_list = list()
         yolo_target_dict_list = list()
 
+        #将_in通过对应embedding,索引为4的是branch的输出，用来做FPN的特征融合
         def _branch(_embedding, _in):
             for i, e in enumerate(_embedding):
                 _in = e(_in)
@@ -199,17 +204,22 @@ class YoloDecoder(nn.Module):
                     out_branch = _in
             return _in, out_branch
 
+        #  构造backbone，抽出三个来自不同stage的feature
         x2, x1, x0 = backbone_features[-3:]
 
+        #  yolo branch 0，得到输出的feature map和branch
         #  yolo branch 0
         out0, out0_branch = _branch(self.embedding0, x0)
 
+        #  yolo branch 1， 将之前的branch进行一个embedding1和upsample之后
+        #  与backbone抽出的feature x1 concate，最后走一次branch
         #  yolo branch 1
         x1_in = self.embedding1_cbl(out0_branch)
         x1_in = self.embedding1_upsample(x1_in)
         x1_in = torch.cat([x1_in, x1], 1)
         out1, out1_branch = _branch(self.embedding1, x1_in)
 
+        #  重复之前的方法
         #  yolo branch 2
         x2_in = self.embedding2_cbl(out1_branch)
         x2_in = self.embedding2_upsample(x2_in)
