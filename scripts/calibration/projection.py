@@ -110,10 +110,12 @@ class RadialPolyCamProjection(Projection):
         norms = ensure_point_list(norms, dim=1).reshape(norms.size)
 
         rhos = np.linalg.norm(lens_points, axis=1)
+
         thetas = self._rho_to_theta(rhos)
         chis = norms * np.sin(thetas)
         zs = norms * np.cos(thetas)
         xy = np.divide(chis, rhos, where=(rhos != 0))[:, np.newaxis] * lens_points
+        print(lens_points)
         xyz = np.hstack((xy, zs[:, np.newaxis]))
         return xyz
 
@@ -124,8 +126,9 @@ class RadialPolyCamProjection(Projection):
         coeff = list(reversed(self.coefficients))
         results = np.zeros_like(rho)
         for i, _r in enumerate(rho):
-            theta = np.roots([*coeff, -_r])
-            theta = np.real(theta[theta.imag == 0])
+            theta = np.roots([*coeff, -_r])# 返回具有在 K4*x^4 + K3*x^3 + K2*x^2 + K1*x - rho =0 的多项式的根。
+            theta = np.real(theta[theta.imag == 0])  # theta.imag 虚部赋值0
+            
             theta = theta[np.where(np.abs(theta) < np.pi)]
             theta = np.min(theta) if theta.size > 0 else 0
             results[i] = theta
